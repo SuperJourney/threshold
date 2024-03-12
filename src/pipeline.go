@@ -4,7 +4,7 @@ import (
 	"context"
 	"log"
 
-	"github.com/SuperJourney/threshold/util"
+	"github.com/SuperJourney/threshold/src/util"
 )
 
 type RunableFunc func() (uint32, error)
