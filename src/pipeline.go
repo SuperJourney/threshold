@@ -1,8 +1,10 @@
-package internal
+package threshold
 
 import (
 	"context"
-	"sync"
+	"log"
+
+	"github.com/SuperJourney/threshold/util"
 )
 
 type RunableFunc func() (uint32, error)
@@ -18,15 +20,12 @@ type Pipeline struct {
 		Action RunableFunc
 		Cancel CancelFunc
 	}
+
 	CancelList []CancelFunc
-	log        LoggerIFace
-	err        []error
 }
 
-func NewPipeline(log LoggerIFace) *Pipeline {
-	return &Pipeline{
-		log: log,
-	}
+func NewPipeline() *Pipeline {
+	return &Pipeline{}
 }
 
 func (p *Pipeline) Add(ctx context.Context, action RunableFunc, cancel CancelFunc) error {
@@ -48,7 +47,6 @@ func (p *Pipeline) Start(ctx context.Context) (code uint32, err error) {
 			_ = p.Cancel(ctx)
 		}
 	}()
-
 	for _, v := range p.List {
 		if v.Action != nil {
 			code, err = v.Action()
@@ -56,7 +54,7 @@ func (p *Pipeline) Start(ctx context.Context) (code uint32, err error) {
 			if code != 0 {
 				return code, nil
 			}
-
+			// 通过了，添加回滚
 			if v.Cancel != nil {
 				p.CancelList = append(p.CancelList, v.Cancel)
 			}
@@ -64,34 +62,21 @@ func (p *Pipeline) Start(ctx context.Context) (code uint32, err error) {
 			if err != nil {
 				return code, err
 			}
+
 		}
 	}
-
 	return
 }
 
 func (p *Pipeline) Cancel(ctx context.Context) error {
-	var wg sync.WaitGroup
-	errCh := make(chan error, len(p.CancelList))
-
 	for _, v := range p.CancelList {
-		wg.Add(1)
-		go func(v func() error) {
-			defer wg.Done()
-			errCh <- v()
-		}(v)
+		v := v
+		go util.PanicHandle(func(ctx context.Context) {
+			err := v()
+			if err != nil {
+				log.Fatalf("cancel error: %v", err)
+			}
+		})(ctx)
 	}
-
-	go func() {
-		wg.Wait()
-		close(errCh)
-	}()
-
-	for err := range errCh {
-		if err != nil {
-			p.err = append(p.err, err)
-		}
-	}
-
 	return nil
 }
